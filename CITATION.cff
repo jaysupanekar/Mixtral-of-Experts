@@ -1,0 +1,25 @@
+cff-version: 1.2.0
+message: "If you use this presentation material, please cite the original Mixtral paper."
+title: "Mixtral of Experts: Presentation and Technical Analysis"
+authors:
+  - family-names: "Tyagi"
+    given-names: "Shivam"
+date-released: 2025-10-23
+url: "https://github.com/yourusername/mixtral-presentation"
+preferred-citation:
+  type: article
+  authors:
+    - family-names: "Jiang"
+      given-names: "Albert Q."
+    - family-names: "Sablayrolles"
+      given-names: "Alexandre"
+    - family-names: "Roux"
+      given-names: "Antoine"
+    - family-names: "Mensch"
+      given-names: "Arthur"
+    - name: "Mistral AI Team"
+  title: "Mixtral of Experts"
+  year: 2024
+  journal: "arXiv preprint"
+  identifier: "arXiv:2401.04088"
+  url: "https://arxiv.org/abs/2401.04088"
