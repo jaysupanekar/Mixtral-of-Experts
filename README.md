@@ -5,7 +5,7 @@
 **Release:** January 2024  
 **ArXiv:** https://arxiv.org/abs/2401.04088
 
-**Presented by:** [Your Name]  
+**Presented by:** Jay Supanekar
 **Date:** Fall 2025
 
 ---
