@@ -294,354 +294,174 @@ For Mixtral specifically:
 
 ## Formal Algorithm Specifications
 
-This section provides mathematically precise pseudocode for Mixtral's architecture, following notation conventions from [Phuong & Hutter, 2022](https://arxiv.org/abs/2207.09238).
+This section provides mathematically precise pseudocode for Mixtral’s architecture, consistent with Phuong & Hutter (2022), using ASCII-safe symbols.
 
 ### Notation
+For a matrix M in R^{n x m}:
+- M[i, :]  = i-th row
+- M[:, j]  = j-th column
+- M[i, j]  = entry at (i, j)
+- 1^T      = row vector of ones
 
-For a matrix M ∈ ℝⁿˣᵐ:
-- M[i, :] denotes the i-th row
-- M[:, j] denotes the j-th column
-- M[i, j] denotes entry at row i, column j
-- 1ᵀ denotes a row vector of ones
+Causal mask (literal):
+Mask[Vz, Vx] := [[ Vz <= Vx ]]
 
-Activation functions:
-```
-SwiGLU(x) = Swish(W₁x) ⊙ (W₂x)
-Swish(x) = x · σ(x) = x/(1 + e⁻ˣ)
-```
+Activation functions (experts use SwiGLU):
+SwiGLU(x) = Swish(W1 x) .* (W2 x)
+Swish(x)  = x * sigma(x) = x / (1 + exp(-x))
 
-where ⊙ denotes element-wise multiplication.
-
-### Algorithm 1: Standard FFN Layer (Baseline for Comparison)
-
-```
-Algorithm 1: Standard Feedforward Network (FFN)
-
-Input:  X ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ˡ, hidden states for sequence of length ℓ
-Output: Y ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ˡ, transformed hidden states
-
-Hyperparameters:
-        d_model ∈ ℕ, model dimension
-        d_ffn ∈ ℕ, feedforward dimension (typically 4 × d_model)
-
-Parameters:
-        W₁ ∈ ℝᵈᶠᶠⁿ ˣ ᵈᵐᵒᵈᵉˡ, first projection  
-        W₂ ∈ ℝᵈᶠᶠⁿ ˣ ᵈᵐᵒᵈᵉˡ, gate projection
-        W₃ ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ᵈᶠᶠⁿ, output projection
-
-Algorithm:
-1:  return Y = W₃ · (Swish(W₁ · X) ⊙ (W₂ · X))
-
-Active Parameters per Token: d_model × d_ffn × 3
-Time Complexity: O(d_model × d_ffn × ℓ)
-```
-
-**Key Property:** Every token uses all parameters. This is the standard dense feedforward layer used in vanilla Transformers.
-
-**Comparison Point:** This is what Mixtral replaces with MoE layers.
+Note: Standard FFN often uses GELU; Mixtral experts use SwiGLU.
 
 ---
 
-### Algorithm 2: Router Network
+### Algorithm 1 – Standard Feedforward Network (FFN)
 
-The router network determines which experts should process each token.
-
-```
-Algorithm 2: Expert Router (Top-K Selection)
-
-Input:  x ∈ ℝᵈᵐᵒᵈᵉˡ, hidden state for a single token
-Output: expert_indices ∈ ℕᴷ, indices of selected experts
-        expert_weights ∈ ℝᴷ, normalized weights for selected experts
+Input:   mu in R^{Qe x L}
+Output:  Y  in R^{Qe x L}
 
 Hyperparameters:
-        N ∈ ℕ, total number of experts (N = 8 for Mixtral)
-        K ∈ ℕ, number of experts to select (K = 2 for Mixtral)
+  Qe, Qff (typically Qff ~ 4 * Qe)
 
 Parameters:
-        W_gate ∈ ℝᴺ ˣ ᵈᵐᵒᵈᵉˡ, routing weight matrix
+  W_up   in R^{Qff x Qe}
+  W_down in R^{Qe  x Qff}
 
 Algorithm:
-1:  logits ← W_gate · x                    ▷ Compute scores for each expert
-2:  
-3:  ▷ Select top-K experts
-4:  expert_indices ← argtop-K(logits)      ▷ Indices of K largest logits
-5:  
-6:  ▷ Extract logits for selected experts only
-7:  selected_logits ← [logits[i] for i in expert_indices]
-8:  
-9:  ▷ Compute normalized weights via softmax
-10: expert_weights ← softmax(selected_logits)
-11: 
-12: return (expert_indices, expert_weights)
+1:  Y <- W_down * GELU(W_up * mu)
+2:  return Y
 
-Computational Cost: O(N × d_model) - very cheap!
-```
-
-**Key Design Decisions:**
-
-1. **Why TopK instead of threshold?** 
-   - TopK guarantees exactly K experts activated (predictable compute)
-   - Threshold could activate 0 or N experts (unpredictable)
-
-2. **Why softmax only over selected K?**
-   - Ensures weights sum to 1
-   - Gradients only flow to selected experts (efficiency)
-   - Non-selected experts get 0 weight (truly sparse)
+Active params per token: 2 * Qe * Qff
+Time complexity: O(Qe * Qff * L)
 
 ---
 
-### Algorithm 3: Mixture of Experts Layer
+### Algorithm 2 – Expert Router (Top-K)
 
-```
-Algorithm 3: Sparse Mixture-of-Experts (SMoE) Layer
-
-Input:  X ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ˡ, hidden states for sequence
-Output: Y ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ˡ, transformed hidden states
+Input:   mu_t in R^{Qe}        # single-token hidden state
+Output:  expert_indices in N^K, expert_weights in R^K
 
 Hyperparameters:
-        N ∈ ℕ, number of experts (N = 8)
-        K ∈ ℕ, experts per token (K = 2)
-        d_model, d_ffn ∈ ℕ, dimensions
+  N = number of experts (e.g., 8)
+  K = experts per token (e.g., 2)
 
 Parameters:
-        W_gate ∈ ℝᴺ ˣ ᵈᵐᵒᵈᵉˡ, router parameters
-        For each expert e ∈ [N]:
-            W₁ᵉ ∈ ℝᵈᶠᶠⁿ ˣ ᵈᵐᵒᵈᵉˡ, expert's first projection
-            W₂ᵉ ∈ ℝᵈᶠᶠⁿ ˣ ᵈᵐᵒᵈᵉˡ, expert's gate projection
-            W₃ᵉ ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ᵈᶠᶠⁿ, expert's output projection
+  W_gate in R^{N x Qe}
 
 Algorithm:
-1:  Initialize Y ← 0ᵈᵐᵒᵈᵉˡ ˣ ˡ                  ▷ Output accumulator
-2:  
-3:  for t = 1 to ℓ do                            ▷ For each token
-4:      x ← X[:, t]                              ▷ Get token hidden state
-5:      
-6:      ▷ Route to experts
-7:      (expert_indices, weights) ← Router(x, W_gate, N, K)
-8:      
-9:      ▷ Compute expert outputs and combine
-10:     y ← 0ᵈᵐᵒᵈᵉˡ                               ▷ Token output accumulator
-11:     for k = 1 to K do                        ▷ For each selected expert
-12:         e ← expert_indices[k]               ▷ Get expert index
-13:         w ← weights[k]                      ▷ Get expert weight
-14:         
-15:         ▷ Expert computation (SwiGLU)
-16:         h ← Swish(W₁ᵉ · x) ⊙ (W₂ᵉ · x)
-17:         expert_out ← W₃ᵉ · h
-18:         
-19:         ▷ Weighted accumulation
-20:         y ← y + w · expert_out
-21:     end for
-22:     
-23:     Y[:, t] ← y                              ▷ Store token output
-24: end for
-25: 
-26: return Y
+1:  logits <- W_gate * mu_t
+2:  expert_indices <- argtopK(logits, K)
+3:  selected_logits <- [logits[i] for i in expert_indices]
+4:  expert_weights <- softmax(selected_logits)
+5:  return (expert_indices, expert_weights)
 
-Active Parameters per Token:
-    Router: N × d_model
-    K Experts: K × (3 × d_model × d_ffn)
-    Total: N × d_model + K × 3 × d_model × d_ffn
-    
-For Mixtral (N=8, K=2): 8 × d_model + 6 × d_model × d_ffn
-    (Only 2/8 = 25% of expert parameters are active!)
-```
-
-**Comparison to Standard FFN:**
-
-| Aspect | Standard FFN | Mixtral MoE (N=8, K=2) |
-|--------|-------------|------------------------|
-| Total parameters | 3 × d_model × d_ffn | 8 × 3 × d_model × d_ffn |
-| Active per token | 3 × d_model × d_ffn | 6 × d_model × d_ffn |
-| Parameter efficiency | 100% active | 25% active |
-| Specialization | None | 8 specialized experts |
-
-**Key Difference from Formal Algorithms Paper:**
-
-The formal algorithms paper (Phuong & Hutter, 2022) describes standard Transformers with dense FFN layers. Mixtral's innovation is replacing Algorithm 1 (Standard FFN) with Algorithm 3 (SMoE Layer) while keeping the attention mechanism unchanged.
+Cost per token: O(N * Qe)
 
 ---
 
-### Algorithm 4: Load Balancing Loss
+### Algorithm 3 – Sparse Mixture-of-Experts (SMoE) Layer
 
-A key challenge in MoE training: ensuring experts are used roughly equally to prevent some experts from being undertrained.
+Input:   mu in R^{Qe x L}
+Output:  Y  in R^{Qe x L}
 
-```
-Algorithm 4: Compute Load Balancing Auxiliary Loss
+Hyperparameters: N, K, Qe, Qff
 
-Input:  routing_matrix ∈ ℝᴺ ˣ ⁽ᴮˣˡ⁾, router assignment for batch
-        (routing_matrix[e, t] = 1 if expert e selected for token t)
-Output: L_balance ∈ ℝ, load balancing loss
-
-Hyperparameters:
-        N ∈ ℕ, number of experts
-        B ∈ ℕ, batch size
-        ℓ ∈ ℕ, sequence length
-        α ∈ ℝ⁺, balancing coefficient (e.g., α = 0.01)
+Parameters:
+  W_gate in R^{N x Qe}
+  For each expert e in {1..N}:
+    W1^e in R^{Qff x Qe}
+    W2^e in R^{Qff x Qe}
+    W3^e in R^{Qe  x Qff}
 
 Algorithm:
-1:  T ← B × ℓ                                    ▷ Total tokens in batch
-2:  
-3:  ▷ Compute fraction of tokens routed to each expert
-4:  for e = 1 to N do
-5:      fₑ ← (1/T) × sum(routing_matrix[e, :])  ▷ Fraction for expert e
-6:  end for
-7:  
-8:  ▷ Compute proportion of total capacity used by each expert  
-9:  ▷ (If K experts per token, total capacity is K×T)
-10: for e = 1 to N do
-11:     Pₑ ← (K/T) × sum(routing_matrix[e, :])  ▷ Proportion for expert e
-12: end for
-13: 
-14: ▷ Load balancing loss (encourage uniform distribution)
-15: L_balance ← N × Σ_{e=1}ᴺ (fₑ × Pₑ)
-16: 
-17: ▷ Total loss
-18: L_total ← L_language_model + α × L_balance
-19: 
-20: return L_total
-
-Purpose: Encourages router to use all experts roughly equally
-Prevents: Expert collapse (some experts never used)
-Trade-off: Slight push toward uniformity vs optimal routing
-```
-
-**Why this loss works:**
-
-- **fₑ:** How much this expert is used (empirical)
-- **Pₑ:** How much this expert should be used if uniform (K/N)
-- **Product fₑ × Pₑ:** Penalizes deviations from uniform
-- **Coefficient α:** Balances load balancing vs task performance
-
-**Without this loss:** 
-- Router might collapse to using only 1-2 experts
-- Other experts become dead weights
-- Model degrades to a smaller dense model
+1:  Y <- zeros(Qe, L)
+2:  for t = 1..L:
+3:      x <- mu[:, t]
+4:      (idx, wts) <- Router(x | W_gate, N, K)
+5:      y <- zeros(Qe)
+6:      for k = 1..K:
+7:          e <- idx[k]; alpha <- wts[k]
+8:          h <- Swish(W1^e * x) .* (W2^e * x)   # SwiGLU
+9:          out <- W3^e * h
+10:         y <- y + alpha * out
+11:     end for
+12:     Y[:, t] <- y
+13: end for
+14: return Y
 
 ---
 
-### Algorithm 5: Full Mixtral Decoder Block
+### Algorithm 4 – Load-Balancing Auxiliary Loss
 
-Now we combine everything into a complete transformer block with MoE.
-
-```
-Algorithm 5: Mixtral Decoder Block (with SMoE)
-
-Input:  X ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ˡ, input hidden states
-        Mask ∈ {0,1}ˡ ˣ ˡ, causal attention mask
-Output: X_out ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ˡ, output hidden states
+Input:   R in R^{N x (B * L)}   # routing matrix; R[e, tau] = 1 if expert e used for token tau
+Output:  L_balance in R
 
 Hyperparameters:
-        H ∈ ℕ, number of attention heads
-        N ∈ ℕ, number of experts (N = 8)
-        K ∈ ℕ, experts per token (K = 2)
-        d_model, d_head, d_ffn ∈ ℕ, dimensions
-
-Parameters:
-        ▷ Self-attention parameters
-        For each head h ∈ [H]:
-            W_Qʰ, W_Kʰ, W_Vʰ ∈ ℝᵈʰᵉᵃᵈ ˣ ᵈᵐᵒᵈᵉˡ
-        W_O ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ⁽ᴴˣᵈʰᵉᵃᵈ⁾
-        
-        ▷ Layer normalization parameters
-        γ₁, γ₂ ∈ ℝᵈᵐᵒᵈᵉˡ, scale parameters
-        β₁, β₂ ∈ ℝᵈᵐᵒᵈᵉˡ, shift parameters
-        
-        ▷ MoE layer parameters (from Algorithm 3)
-        W_gate ∈ ℝᴺ ˣ ᵈᵐᵒᵈᵉˡ
-        {W₁ᵉ, W₂ᵉ, W₃ᵉ}_{e=1}ᴺ
+  N, B, L, K, alpha (e.g., 0.01)
 
 Algorithm:
-1:  ▷ Pre-norm self-attention
-2:  X_norm ← LayerNorm(X | γ₁, β₁)
-3:  X_attn ← MultiHeadAttention(X_norm, X_norm | Mask)
-4:  X ← X + X_attn                              ▷ Residual connection
-5:  
-6:  ▷ Pre-norm MoE layer
-7:  X_norm ← LayerNorm(X | γ₂, β₂)
-8:  X_moe ← SMoE(X_norm | N, K, W_gate, {Wᵢᵉ})
-9:  X_out ← X + X_moe                           ▷ Residual connection
-10: 
-11: return X_out
+1:  T <- B * L
+2:  for e = 1..N:
+3:      f_e <- (1 / T) * sum_over_tau R[e, tau]   # empirical fraction to expert e
+4:      P_e <- (K / T) * sum_over_tau R[e, tau]   # proportional capacity usage
+5:  end for
+6:  L_balance <- N * sum_{e=1..N} (f_e * P_e)
+7:  return L_balance
 
-Key Difference from Standard Transformer:
-    Line 8: MoE layer instead of standard FFN
-    Each token dynamically routes through different experts
-```
-
-**Differences from Formal Algorithms Paper's Decoder:**
-
-The formal algorithms paper (Phuong & Hutter) provides Algorithm 10 for GPT (decoder-only transformer). Mixtral modifies this by:
-1. **Replacing FFN with MoE:** Line 8 uses SMoE instead of dense FFN
-2. **Adding router:** Each layer now has a router network
-3. **Keeping attention unchanged:** Multi-head attention remains the same
+Total loss: L_total <- L_lm + alpha * L_balance
 
 ---
 
-### Algorithm 6: Complete Mixtral Architecture
+### Algorithm 5 – Decoder Block with MoE FFN (Pre-Norm)
 
-```
-Algorithm 6: Full Mixtral Architecture
-
-Input:  token_ids ∈ ℕˡ, sequence of token IDs
-Output: P ∈ ℝⱽ ˣ ˡ, probability distribution over vocabulary
-        (P[:, t] = probability distribution for token t+1)
-
-Hyperparameters:
-        V ∈ ℕ, vocabulary size (V = 32000)
-        L ∈ ℕ, number of layers (L = 32)
-        d_model ∈ ℕ, model dimension (d_model = 4096)
-        context_len ∈ ℕ, max sequence length (context_len = 32768)
-        Other hyperparameters from Algorithm 5
+Input:   mu in R^{Qe x L}
+         Mask in {0,1}^{L x L}   # Mask[Vz, Vx] := [[ Vz <= Vx ]]
+Output:  mu_out in R^{Qe x L}
 
 Parameters:
-        W_embed ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ⱽ, token embeddings
-        W_pos ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ᶜᵒⁿᵗᵉˣᵗ_ˡᵉⁿ, positional embeddings
-        {θᵢ}_{i=1}ᴸ, parameters for L decoder blocks
-        W_unembed ∈ ℝⱽ ˣ ᵈᵐᵒᵈᵉˡ, output projection
-        γ_final, β_final ∈ ℝᵈᵐᵒᵈᵉˡ, final layer norm
+  W^n (multi-head attention params)
+  (nu1, phi1), (nu2, phi2) layer-norm params
+  W_gate, {W_i^e}_{i=1..N} MoE params
 
 Algorithm:
-1:  ℓ ← length(token_ids)
-2:  
-3:  ▷ Embedding
-4:  for t = 1 to ℓ do
-5:      hₜ ← W_embed[:, token_ids[t]] + W_pos[:, t]
-6:  end for
-7:  H ← [h₁, h₂, ..., hₗ]                      ▷ H ∈ ℝᵈᵐᵒᵈᵉˡ ˣ ˡ
-8:  
-9:  ▷ Create causal mask
-10: for i = 1 to ℓ do
-11:     for j = 1 to ℓ do
-12:         Mask[i, j] ← 1 if i ≤ j else 0
-13:     end for
-14: end for
-15: 
-16: ▷ Apply decoder blocks
-17: for layer = 1 to L do
-18:     H ← MixtralDecoderBlock(H, Mask | θ_layer)
-19: end for
-20: 
-21: ▷ Final layer norm
-22: H ← LayerNorm(H | γ_final, β_final)
-23: 
-24: ▷ Unembed to vocabulary
-25: Logits ← W_unembed · H
-26: 
-27: ▷ Apply softmax per position
-28: for t = 1 to ℓ do
-29:     P[:, t] ← softmax(Logits[:, t])
-30: end for
-31: 
-32: return P
+1:  mu_hat <- layer_norm(mu | nu1, phi1)
+2:  mu_attn <- MHAttention(mu_hat, mu_hat | W^n, Mask)
+3:  mu <- mu + mu_attn
+4:  mu_hat <- layer_norm(mu | nu2, phi2)
+5:  mu_moe <- SMoE(mu_hat | N, K, W_gate, {W_i^e})
+6:  mu_out <- mu + mu_moe
+7:  return mu_out
 
-Model Statistics:
-    Total Parameters: 47B
-    Active Parameters per Token: 13B
-    Memory for KV Cache: Similar to 13B dense model  
-    Inference Speed: ~Similar to 13B dense model
-    Quality: Exceeds many 70B dense models
-```
+---
+
+### Algorithm 6 – DTransformer (Mixtral Decoder-Only Architecture)
+
+Input:   N_seq in N^L   # token ID sequence
+Output:  omega in (0,1)^{Mv x L}   # next-token distributions
+
+Hyperparameters:
+  L (layers), Qe (model width), Mv (vocab size), Omax (max context)
+
+Parameters:
+  delta_gamma in R^{Qe x Mv}   # token embedding
+  delta_epsilon in R^{Qe x Omax}  # positional embedding
+  {theta_layer}_{1..L}  # decoder blocks (W^n, norms, MoE)
+  delta_psi in R^{Mv x Qe}  # unembedding
+  (nu_final, phi_final)  # final layer-norm
+
+Algorithm:
+1:  O <- length(N_seq)
+2:  for V = 1..O:
+3:      gamma_V <- delta_gamma[:, N_seq[V]] + delta_epsilon[:, V]
+4:  end for
+5:  mu <- [gamma_1, gamma_2, ..., gamma_O]   # mu in R^{Qe x O}
+6:  Mask[Vz, Vx] := [[ Vz <= Vx ]]
+7:  for layer = 1..L:
+8:      mu <- DecoderBlock_MoE(mu, Mask | theta_layer)
+9:  end for
+10: mu <- layer_norm(mu | nu_final, phi_final)
+11: omega <- softmax(delta_psi * mu)
+12: return omega
+
 
 **Architectural Comparison Table:**
 
