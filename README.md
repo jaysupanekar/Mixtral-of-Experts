@@ -53,7 +53,7 @@ Traditional approaches failed because:
 
 ### The Mixtral Solution: Sparse Mixture of Experts (SMoE)
 
-**The breakthrough insight:** Not every input needs every parameter. A math problem doesn't need poetry-writing parameters, and a French translation doesn't need code-generation parameters.
+**The breakthrough insight:** Not every input needs every parameter.
 
 **Mixtral's architecture:**
 - **8 expert networks** at each layer (instead of 1 feedforward network)
@@ -61,7 +61,7 @@ Traditional approaches failed because:
 - **47B total parameters**, but only **13B active per token**
 - Result: Quality of a 47B model with compute cost of a 13B model
 
-Think of it like having 8 different specialists in a hospital:
+Analogy: Think of it like having 8 different specialists in a hospital
 - You have access to all 8 specialists (47B parameters total)
 - But for each patient (token), only 2 specialists examine them (13B active)
 - A router (triage system) decides which specialists are needed
