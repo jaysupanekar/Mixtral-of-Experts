@@ -338,7 +338,7 @@ where $\text{Swish}(x) = x \cdot \sigma(x)$ and $\odot$ denotes element-wise mul
 
 ---
 
-## Algorithm 2: Router (Top-$k$ Gating)
+## Algorithm 2: Router (Top-k Gating)
 
 **Purpose:** Selects which experts process each token.
 
