@@ -291,7 +291,6 @@ For Mixtral specifically:
 </details>
 
 ---
-
 # Formal Algorithm Specifications
 
 Following the notation conventions from Phuong & Hutter (2022), we provide precise pseudocode for Mixtral's architecture.
@@ -305,13 +304,10 @@ For a matrix $M \in \mathbb{R}^{m \times n}$:
 For a sequence $x \equiv x[1:n] \equiv x[1]x[2]\ldots x[n] \in \mathcal{V}^*$ where $\mathcal{V}$ is the vocabulary.
 
 Key functions:
-```math
-\text{softmax}(v)_i = \frac{\exp(v_i)}{\sum_j \exp(v_j)}
-```
 
-```math
-\text{SwiGLU}(x) = \text{Swish}(W_1 x + b_1) \odot (W_2 x + b_2)
-```
+$$\text{softmax}(v)_i = \frac{\exp(v_i)}{\sum_j \exp(v_j)}$$
+
+$$\text{SwiGLU}(x) = \text{Swish}(W_1 x + b_1) \odot (W_2 x + b_2)$$
 
 where $\text{Swish}(x) = x \cdot \sigma(x)$ and $\odot$ denotes element-wise multiplication.
 
@@ -334,11 +330,11 @@ where $\text{Swish}(x) = x \cdot \sigma(x)$ and $\odot$ denotes element-wise mul
 **Algorithm:**
 ```
 1:  h ← W_1 x + b_1
-2:  y ← W_2 · \text{GELU}(h) + b_2
+2:  y ← W_2 · GELU(h) + b_2
 3:  return y
 ```
 
-**Complexity:** Active parameters per token: $2 \cdot d_e \cdot d_{ff} \approx 118$M
+**Complexity:** Active parameters per token: $2 \cdot d_e \cdot d_{ff} \approx 118\text{M}$
 
 ---
 
@@ -358,18 +354,16 @@ where $\text{Swish}(x) = x \cdot \sigma(x)$ and $\odot$ denotes element-wise mul
 
 **Algorithm:**
 ```
-Algorithm: Top-K Gating
-
-1:  ℓ ← xᵀ W_g                      ▷ Compute logits in Rⁿ
-2:  I ← TopK(ℓ, k)                  ▷ Indices of top-k logits
+1:  ℓ ← x^T W_g                                    ▷ Compute logits ∈ ℝⁿ
+2:  I ← TopK(ℓ, k)                                 ▷ Indices of top-k logits
 3:  for i = 1 to n do
 4:      if i ∈ I then
 5:          ℓ_masked[i] ← ℓ[i]
 6:      else
-7:          ℓ_masked[i] ← −∞        ▷ Mask non-selected
+7:          ℓ_masked[i] ← -∞                       ▷ Mask non-selected
 8:      end if
 9:  end for
-10: G ← softmax(ℓ_masked)            ▷ Normalize over selected
+10: G ← softmax(ℓ_masked)                          ▷ Normalize over selected
 11: return (I, G)
 ```
 
@@ -400,14 +394,14 @@ Algorithm: Top-K Gating
 ```
 1:  for t = 1 to ℓ do                             ▷ Process each token
 2:      x ← X[:, t]                               ▷ Get token embedding
-3:      (I, G) ← \text{Router}(x | W_g, n, k)    ▷ Algorithm 2
+3:      (I, G) ← Router(x | W_g, n, k)            ▷ Algorithm 2
 4:      y ← 0_{d_e}                               ▷ Initialize output
-5:      for each i ∈ I do                        ▷ Sum over selected experts
-6:          h_1 ← \text{Swish}(W_1^i x + b_1^i)
+5:      for each i ∈ I do                         ▷ Sum over selected experts
+6:          h_1 ← Swish(W_1^i x + b_1^i)
 7:          h_2 ← W_2^i x + b_2^i
-8:          h ← h_1 \odot h_2                     ▷ SwiGLU activation
+8:          h ← h_1 ⊙ h_2                         ▷ SwiGLU activation
 9:          out ← W_3^i h + b_3^i
-10:         y ← y + G[i] \cdot out               ▷ Weighted sum
+10:         y ← y + G[i] · out                    ▷ Weighted sum
 11:     end for
 12:     Y[:, t] ← y
 13: end for
@@ -421,7 +415,7 @@ Algorithm: Top-K Gating
 | **Structure** | Single feedforward network | $n = 8$ expert networks |
 | **Active per token** | All parameters | Only $k = 2$ experts |
 | **Parameter count** | $2 \cdot d_e \cdot d_{ff}$ | $n \cdot 3 \cdot d_e \cdot d_{ff}$ |
-| **Active params** | $\sim 118$M | $\sim 118$M (same cost!) |
+| **Active params** | $\sim 118\text{M}$ | $\sim 118\text{M}$ (same cost!) |
 | **Total capacity** | Limited | $4\times$ larger |
 | **Routing** | None (static) | Dynamic (per-token) |
 
@@ -461,25 +455,25 @@ where $P[:, t]$ represents $\hat{p}(s_{t+1} \mid s_{1:t})$
 2:  for t = 1 to ℓ do
 3:      x_t ← W_e[:, s[t]] + W_p[:, t]          ▷ Token + position
 4:  end for
-5:  X ← [x_1, x_2, \ldots, x_\ell]              ▷ X ∈ ℝ^{d_e × ℓ}
+5:  X ← [x_1, x_2, …, x_ℓ]                      ▷ X ∈ ℝ^{d_e × ℓ}
 6:  
 7:  ▷ Transformer layers with MoE
 8:  for layer = 1 to L do
 9:      ▷ Self-attention sub-layer
-10:     X̂ ← \text{layer\_norm}(X | γ_1^{layer}, β_1^{layer})
+10:     X̂ ← layer_norm(X | γ_1^{layer}, β_1^{layer})
 11:     Mask[i, j] ← [[i ≤ j]]                 ▷ Causal mask
-12:     X_{\text{attn}} ← \text{MHAttention}(X̂, X̂ | W^{layer}_{\text{attn}}, Mask)
-13:     X ← X + X_{\text{attn}}                 ▷ Residual connection
+12:     X_attn ← MHAttention(X̂, X̂ | W^{layer}_attn, Mask)
+13:     X ← X + X_attn                          ▷ Residual connection
 14:     
 15:     ▷ MoE sub-layer
-16:     X̂ ← \text{layer\_norm}(X | γ_2^{layer}, β_2^{layer})
-17:     X_{\text{moe}} ← \text{SMoE}(X̂ | W_g^{layer}, \{W_i^{e,layer}\})  ▷ Algorithm 3
-18:     X ← X + X_{\text{moe}}                  ▷ Residual connection
+16:     X̂ ← layer_norm(X | γ_2^{layer}, β_2^{layer})
+17:     X_moe ← SMoE(X̂ | W_g^{layer}, {W_i^{e,layer}})  ▷ Algorithm 3
+18:     X ← X + X_moe                           ▷ Residual connection
 19: end for
 20: 
 21: ▷ Output projection
-22: X ← \text{layer\_norm}(X | γ_f, β_f)
-23: P ← \text{softmax}(W_u X)                   ▷ Column-wise softmax
+22: X ← layer_norm(X | γ_f, β_f)
+23: P ← softmax(W_u X)                          ▷ Column-wise softmax
 24: return P
 ```
 
@@ -489,31 +483,31 @@ where $P[:, t]$ represents $\hat{p}(s_{t+1} \mid s_{1:t})$
 - **MoE replacement:** Every feedforward block is replaced with Algorithm 3
 - Mixtral uses **RMSNorm** instead of standard LayerNorm for efficiency
 - Mixtral uses **Grouped-Query Attention** (32 query heads, 8 KV heads)
-
+  
 ---
-
 ## Model Statistics
 
 ### Mixtral 8x7B Parameter Count
 
 | Component | Parameters per Layer | Total (32 layers) |
 |-----------|---------------------|-------------------|
-| Attention | $\sim 200$M | $\sim 6.4$B |
-| MoE (8 experts) | $8 \times 3 \times d_e \times d_{ff} \approx 1.1$B | $\sim 35$B |
-| Other (embeddings, norms) | — | $\sim 5$B |
-| **Total (sparse)** | — | **$\sim 47$B** |
-| **Active per token** | — | **$\sim 13$B** |
+| Attention | ~200M | ~6.4B |
+| MoE (8 experts) | ~1.1B (8 × 3 × d_e × d_ff) | ~35B |
+| Other (embeddings, norms) | — | ~5B |
+| **Total (sparse)** | — | **~47B** |
+| **Active per token** | — | **~13B** |
+
+**Note:** MoE layer has $8 \times 3 \times d_e \times d_{ff} \approx 1.1\text{B}$ parameters per layer.
 
 ### Comparison with Dense Models
 
 | Model | Total Params | Active per Token | FLOPs per Token | Memory (FP16) |
 |-------|-------------|------------------|-----------------|---------------|
-| **Llama 2 70B** | 70B | 70B | $\sim 140$B | $\sim 140$GB |
-| **Mixtral 8x7B** | 47B | 13B | $\sim 26$B | $\sim 94$GB |
+| **Llama 2 70B** | 70B | 70B | ~140B | ~140GB |
+| **Mixtral 8x7B** | 47B | 13B | ~26B | ~94GB |
 | **Efficiency** | 0.67× | **0.19×** | **0.19×** | 0.67× |
 
 **Key Insight:** Mixtral achieves **better performance** than Llama 2 70B while using **5.4× fewer active parameters** per token.
-
 ---
 
 ## How Mixtral Differs from Previous Models
