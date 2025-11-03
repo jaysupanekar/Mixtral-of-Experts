@@ -358,17 +358,22 @@ where $\text{Swish}(x) = x \cdot \sigma(x)$ and $\odot$ denotes element-wise mul
 
 **Algorithm:**
 ```
-1:  ℓ ← x^T W_g                                    ▷ Compute logits ∈ ℝⁿ
-2:  I ← \text{TopK}(ℓ, k)                         ▷ Indices of top-k logits
-3:  for i = 1 to n do
-4:      if i ∈ I then
-5:          ℓ_{\text{masked}}[i] ← ℓ[i]
-6:      else
-7:          ℓ_{\text{masked}}[i] ← -∞            ▷ Mask non-selected
-8:      end if
-9:  end for
-10: G ← \text{softmax}(ℓ_{\text{masked}})        ▷ Normalize over selected
-11: return (I, G)
+$$
+\begin{aligned}
+&\textbf{Algorithm: Top-K Gating} \\[4pt]
+&1:\ \ \ell \leftarrow x^{\top} W_g \quad &&\text{Compute logits in } \mathbb{R}^n \\[2pt]
+&2:\ \ I \leftarrow \mathrm{TopK}(\ell, k) \quad &&\text{Indices of top-}k\text{ logits} \\[2pt]
+&3:\ \ \textbf{for } i = 1 \text{ to } n \textbf{ do} \\[2pt]
+&4:\ \ \ \ \textbf{if } i \in I \textbf{ then} \\[2pt]
+&5:\ \ \ \ \ \ \ell_{\text{masked}}[i] \leftarrow \ell[i] \\[2pt]
+&6:\ \ \ \ \textbf{else} \\[2pt]
+&7:\ \ \ \ \ \ \ell_{\text{masked}}[i] \leftarrow -\infty \quad &&\text{Mask non-selected logits} \\[2pt]
+&8:\ \ \ \ \textbf{end if} \\[2pt]
+&9:\ \ \textbf{end for} \\[2pt]
+&10:\ G \leftarrow \mathrm{softmax}(\ell_{\text{masked}}) \quad &&\text{Normalize over selected entries} \\[2pt]
+&11:\ \textbf{return } (I, G)
+\end{aligned}
+$$
 ```
 
 **Properties:**
