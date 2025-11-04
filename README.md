@@ -2,7 +2,8 @@
 
 **Paper:** Mixtral of Experts  
 **Authors:** Albert Q. Jiang, Alexandre Sablayrolles, Antoine Roux, Arthur Mensch, and team at Mistral AI  
-**Release:** January 2024 
+**Release:** January 2024
+**ArXiv:** https://arxiv.org/abs/2401.04088
 
 **Presented by:** Jay Supanekar
 **Date:** Fall 2025
